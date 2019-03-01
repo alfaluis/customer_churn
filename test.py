@@ -4,10 +4,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelBinarizer, LabelEncoder, MinMaxScaler
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, roc_curve
+from sklearn.metrics import confusion_matrix, roc_curve, recall_score
 from imblearn.under_sampling import RandomUnderSampler
-from imblearn.over_sampling import RandomOverSampler
+from imblearn.over_sampling import RandomOverSampler, SMOTE
 from sklearn.decomposition import PCA
 
 
@@ -95,6 +96,12 @@ def train_and_test_model(x_train, y_train, x_test, y_test, c, weight=None):
 
 
 if __name__ == '__main__':
+    # NOTES:
+    # - outlier detection
+    # - Try different classifier
+    # - GridSearch -> regularization
+    # - Create new features
+
     root = os.getcwd()
     database = os.path.join(root, 'database')
     df = pd.read_csv(os.path.join(database, 'CustomerChurn.csv'))
@@ -113,6 +120,7 @@ if __name__ == '__main__':
     data.drop(columns=col_2_norm, inplace=True)
 
     train, test = train_test_split(data, test_size=.25)
+
     train_y = train.loc[:, [x for x in train.columns if 'Churn' in x]]
     train_x = train.loc[:, [x for x in train.columns if 'Churn' not in x]]
     test_y = test.loc[:, [x for x in test.columns if 'Churn' in x]]
@@ -150,11 +158,34 @@ if __name__ == '__main__':
     print('Shape after class Churn == False == 0: ', sum(y_ros == 0))
     model_4 = train_and_test_model(x_train=X_ros, y_train=y_ros, x_test=test_x, y_test=test_y, c=1, weight=None)
 
+    sm = SMOTE(random_state=2, sampling_strategy=1.0)
+    x_smote, y_smote = sm.fit_sample(train_x, train_y.ChurnBin.ravel())
+    print('Shape before over-sampling: ', train_x.shape)
+    print('Shape before class Churn == True == 1: ', train_y.loc[train_y.ChurnBin == 1, :].shape)
+    print('Shape before class Churn == False == 0: ', train_y.loc[train_y.ChurnBin == 0, :].shape)
+    print('Shape after over-sampling: ', x_smote.shape)
+    print('Shape after class Churn == True == 1: ', sum(y_smote == 1))
+    print('Shape after class Churn == False == 0: ', sum(y_smote == 0))
+    model_5 = train_and_test_model(x_train=x_smote, y_train=y_smote, x_test=test_x, y_test=test_y, c=1, weight=None)
+
+    y = test_y.copy()
+    clf = GradientBoostingClassifier(learning_rate=0.5, n_estimators=100, max_depth=2, random_state=0)
+    clf.fit(X=train_x, y=train_y.ChurnBin)
+    clf.score(X=test_x, y=test_y.ChurnBin)
+    prob = clf.predict_proba(X=test_x)
+    pred = clf.predict(X=test_x)
+    y.loc[:, 'Yprob'] = prob[:, 1]
+    y.loc[:, 'Ypred'] = pred
+    conf_matrix = confusion_matrix(y.loc[:, 'ChurnBin'], y.loc[:, 'Ypred'])
+    fpr, tpr, thresholds = roc_curve(y.loc[:, 'ChurnBin'], y.loc[:, 'Yprob'])
+    print(conf_matrix)
+
     fig, ax = plt.subplots(2, 1)
     ax[0].plot(model_1['fpr'], model_1['tpr'], label='Simple')
     ax[0].plot(model_2['fpr'], model_2['tpr'], label='Weighted')
     ax[0].plot(model_3['fpr'], model_3['tpr'], label='UnderSample')
     ax[0].plot(model_4['fpr'], model_4['tpr'], label='OverSample')
+    ax[0].plot(model_5['fpr'], model_5['tpr'], label='SMOTE')
     ax[0].grid()
     ax[0].legend()
     ax[0].set_title('ROC')
@@ -162,6 +193,7 @@ if __name__ == '__main__':
     ax[1].plot(model_2['fpr'], model_2['thres'], label='Weighted')
     ax[1].plot(model_3['fpr'], model_3['thres'], label='UnderSample')
     ax[1].plot(model_4['fpr'], model_4['thres'], label='OverSample')
+    ax[1].plot(model_5['fpr'], model_5['thres'], label='SMOTE')
     ax[1].grid()
     ax[1].legend()
     ax[1].set_title('Threshold')
